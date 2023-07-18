@@ -1,0 +1,46 @@
+---
+## ssh-copy-id all hosts for hadoop
+- name: checked hostvars
+  hosts: all
+  become: true
+  vars:
+    user: hadoop
+    home_dir: "/var/{{ user }}"
+  tasks:
+    - name: Create groups
+      group:
+        name: "{{ user }}"
+        state: present
+
+    - name: Generate id_rsa
+      user:
+        name: "{{ user }}"
+        createhome: true
+        generate_ssh_key: true
+        home: "{{ home_dir }}"
+        state: present
+        comment: hadoop user
+        group: "{{ user }}"
+        password: "{{ lookup('password', '/tmp/passwordfile length=8 chars=ascii_letters,digits') }}"
+
+    - name: Pull id_rsa.pub
+      slurp:
+        path: "{{home_dir}}/.ssh/id_rsa.pub"
+      register: id_rsa_pub
+      delegate_to: "{{ item }}"
+      with_items: "{{ groups.all | reject('search', inventory_hostname) | list }}"
+
+    - name: Ssh copy id from all servers
+      authorized_key:
+        user: "{{ user }}"
+        key: "{{ item.content | b64decode }}"
+        state: present
+      with_items: "{{ id_rsa_pub.results }}"
+
+    - name: Disable strict host key checking in ssh
+      lineinfile:
+        path: "{{home_dir}}/.ssh/config"
+        line: "Host * \n\tStrictHostKeyChecking no"
+        state: present
+        insertafter: EOF
+        create: True
